@@ -14,7 +14,7 @@ let selectedCourses = []; // Guarda los cursos que el usuario ha seleccionado
 const cursosContainer = document.getElementById('cursosContainer');
 const horarioGrid = document.getElementById('horarioGrid');
 const topesAlert = document.getElementById('topesAlert');
-const totalCreditsDisplay = document.getElementById('totalCredits'); 
+const totalCreditsDisplay = document.getElementById('totalCredits');
 const filtroCursoInput = document.getElementById('filtroCurso');
 const clearScheduleBtn = document.getElementById('clearScheduleBtn');
 const exportImageBtn = document.getElementById('exportImageBtn');
@@ -29,7 +29,7 @@ const dayNames = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes']; // Nomb
 // Horarios exactos de los módulos UDP (basado en tu imagen)
 const udpModules = [
     "08:30", "09:40", "10:50", "12:00", "13:10", "14:20", "15:30",
-    "16:40", "17:50", "19:00", "20:10", "21:20" 
+    "16:40", "17:50", "19:00", "20:10", "21:20"
 ];
 
 // Mapeo de la hora de inicio del módulo a su índice (0 a N-1) para facilitar cálculos
@@ -66,23 +66,23 @@ function loadSelectedCourses() {
  * Carga y procesa todos los archivos CSV de cursos.
  */
 async function loadAllCourses() {
-    cursosContainer.innerHTML = '<p>Cargando cursos...</p>'; 
+    cursosContainer.innerHTML = '<p>Cargando cursos...</p>';
 
     const categories = new Set(); // Para el filtro de categorías
-    
+
     for (const file of csvFiles) {
         try {
-            const response = await fetch(file); 
-            const csvText = await response.text(); 
-            const coursesFromFile = parseCSV(csvText); 
-            
+            const response = await fetch(file);
+            const csvText = await response.text();
+            const coursesFromFile = parseCSV(csvText);
+
             // Asigna una categoría basada en el nombre del archivo
             const categoryName = file.replace('_Procesado.csv', '').replace(/_/g, ' ');
             coursesFromFile.forEach(course => {
                 course.Categoria = categoryName;
                 categories.add(categoryName);
             });
-            allCourses = allCourses.concat(coursesFromFile); 
+            allCourses = allCourses.concat(coursesFromFile);
         } catch (error) {
             console.error(`Error al cargar el archivo ${file}:`, error);
             cursosContainer.innerHTML = `<p style="color: red;">Error al cargar el archivo ${file}. Asegúrate de que está en la misma carpeta y su nombre es correcto.</p>`;
@@ -91,19 +91,19 @@ async function loadAllCourses() {
 
     // Filtramos cursos duplicados (si un mismo bloque de clase está en varios CSVs)
     const uniqueCourses = [];
-    const seenCourseIds = new Set(); 
+    const seenCourseIds = new Set();
 
     allCourses.forEach(course => {
-        const id = generateCourseId(course); 
+        const id = generateCourseId(course);
         if (!seenCourseIds.has(id)) {
             uniqueCourses.push(course);
             seenCourseIds.add(id);
         }
     });
-    allCourses = uniqueCourses; 
+    allCourses = uniqueCourses;
 
     populateCategoryFilter(Array.from(categories)); // Rellenar filtro de categorías
-    displayCourses(allCourses); 
+    displayCourses(allCourses);
     drawHorarioGrid(); // Dibuja la estructura base del horario UNA SOLA VEZ
     updateHorario(); // Actualiza el horario con los cursos seleccionados (incluyendo los de persistencia)
 }
@@ -129,14 +129,28 @@ function populateCategoryFilter(categories) {
  */
 function parseCSV(csvText) {
     const lines = csvText.split('\n').filter(line => line.trim() !== '');
-    if (lines.length === 0) return []; // Si el archivo está vacío
+    if (lines.length === 0) return [];
+
+    // Regex para dividir por comas, pero ignorando comas dentro de comillas dobles.
+    // También maneja casos donde el último campo está vacío después de una coma.
+    // Fuente: Adaptado de ejemplos comunes de parsing CSV en JS para manejar comillas
+    const csvRowRegex = /,(?=(?:(?:[^"]*"){2})*[^"]*$)|(?<=^[^"]*),/g;
+
 
     const headers = lines[0].split(',').map(header => header.trim());
 
-    const courses = []; 
-    for (let i = 1; i < lines.length; i++) { 
-        const values = lines[i].split(',').map(value => value.trim()); 
-        
+    const courses = [];
+    for (let i = 1; i < lines.length; i++) {
+        // Usa la regex para dividir la línea, y luego trim() cada valor
+        const values = lines[i].split(csvRowRegex).map(value => value.trim());
+
+        // Manejo de comillas en los valores (eliminar las comillas extra)
+        for (let k = 0; k < values.length; k++) {
+            if (values[k].startsWith('"') && values[k].endsWith('"')) {
+                values[k] = values[k].substring(1, values[k].length - 1);
+            }
+        }
+
         // Asegura que la fila tenga el número correcto de columnas y no esté vacía
         if (values.length === headers.length && values.some(val => val !== '')) {
             const course = {};
@@ -144,13 +158,21 @@ function parseCSV(csvText) {
                 // Si el valor está vacío o es 'nan' (case-insensitive), lo convierte a null
                 course[headers[j]] = (values[j] === '' || values[j].toLowerCase() === 'nan') ? null : values[j];
             }
-            // Parsear créditos a número (si no es un número, se convierte en 0)
-            course.Créditos = parseFloat(course.Créditos) || 0; 
 
-            // Solo agrega el curso si tiene la información esencial para el horario
+            // Agrega el curso si tiene los datos necesarios para posicionarlo en el horario
             if (course.Codigo && course.Nombre && course.Dia && course.HoraInicio && course.HoraFin) {
+                // Rellena campos opcionales con valores por defecto si están vacíos
+                course.Seccion = course.Seccion || "NA";
+                course.Profesor = course.Profesor || "Desconocido";
+                course.Créditos = parseFloat(course.Créditos) || 0;
+
                 courses.push(course);
             }
+        } else {
+            // Opcional: Para depuración, puedes loggear las líneas problemáticas
+            console.warn(`Saltando línea CSV mal formada (no coincide con el número de encabezados): "${lines[i]}"`);
+            console.warn(`Valores parseados:`, values);
+            console.warn(`Encabezados:`, headers);
         }
     }
     return courses;
@@ -161,7 +183,7 @@ function parseCSV(csvText) {
  * @param {Array<Object>} coursesToDisplay Los cursos a mostrar.
  */
 function displayCourses(coursesToDisplay) {
-    cursosContainer.innerHTML = ''; 
+    cursosContainer.innerHTML = '';
 
     if (coursesToDisplay.length === 0) {
         cursosContainer.innerHTML = '<p>No se encontraron cursos que coincidan con la búsqueda.</p>';
@@ -170,7 +192,7 @@ function displayCourses(coursesToDisplay) {
 
     coursesToDisplay.forEach(course => {
         const courseDiv = document.createElement('div');
-        courseDiv.className = 'curso-item'; 
+        courseDiv.className = 'curso-item';
         courseDiv.innerHTML = `
             <div>
                 <strong>${course.Codigo || 'N/A'} - ${course.Nombre || 'N/A'}</strong><br>
@@ -179,10 +201,10 @@ function displayCourses(coursesToDisplay) {
             </div>
             <button data-course-id="${generateCourseId(course)}">Agregar</button>
         `;
-        cursosContainer.appendChild(courseDiv); 
+        cursosContainer.appendChild(courseDiv);
     });
 
-    addCourseEventListeners(); 
+    addCourseEventListeners();
 }
 
 /**
@@ -200,13 +222,13 @@ function generateCourseId(course) {
 function addCourseEventListeners() {
     document.querySelectorAll('.curso-item button').forEach(button => {
         button.onclick = (event) => {
-            const courseId = event.target.dataset.courseId; 
+            const courseId = event.target.dataset.courseId;
             const courseToAdd = allCourses.find(c => generateCourseId(c) === courseId);
 
             if (courseToAdd && !selectedCourses.some(c => generateCourseId(c) === courseId)) {
-                selectedCourses.push(courseToAdd); 
+                selectedCourses.push(courseToAdd);
                 saveSelectedCourses(); // Guarda después de añadir un curso
-                updateHorario(); 
+                updateHorario();
             }
         };
     });
@@ -219,7 +241,7 @@ function addCourseEventListeners() {
 function removeCourse(courseIdToRemove) {
     selectedCourses = selectedCourses.filter(c => generateCourseId(c) !== courseIdToRemove);
     saveSelectedCourses(); // Guarda después de eliminar un curso
-    updateHorario(); 
+    updateHorario();
 }
 
 /**
@@ -233,28 +255,28 @@ function updateHorario() {
     topesAlert.innerHTML = ''; // Limpiamos el mensaje de topes
 
     // Mapa para agrupar cursos que se superponen en el mismo día/franja horaria
-    const conflictingGroupsByTimeSlot = new Map(); 
+    const conflictingGroupsByTimeSlot = new Map();
 
     selectedCourses.forEach(course => {
-        const dayColIndex = daysMap[course.Dia]; 
-        const startHour = parseTime(course.HoraInicio); 
-        const endHour = parseTime(course.HoraFin); 
+        const dayColIndex = daysMap[course.Dia];
+        const startHour = parseTime(course.HoraInicio);
+        const endHour = parseTime(course.HoraFin);
 
         totalCredits += course.Créditos; // Sumar créditos
 
         if (dayColIndex !== undefined && startHour !== null && endHour !== null) {
             let startModuleIndex = -1;
-            
+
             // Encuentra el módulo donde el curso comienza para posicionamiento vertical
             for (let i = 0; i < udpModules.length; i++) {
                 const moduleStartTime = parseTime(udpModules[i]);
-                const nextModuleTime = (i + 1 < udpModules.length) ? parseTime(udpModules[i+1]) : new Date(moduleStartTime.getTime() + moduleDurationMinutes * 60 * 1000); 
+                const nextModuleTime = (i + 1 < udpModules.length) ? parseTime(udpModules[i+1]) : new Date(moduleStartTime.getTime() + moduleDurationMinutes * 60 * 1000);
 
                 if (startHour >= moduleStartTime && startHour < nextModuleTime) {
                     startModuleIndex = i;
                     break;
                 } else if (startHour < moduleStartTime && i === 0) { // Si el curso empieza antes del primer módulo
-                    startModuleIndex = 0; 
+                    startModuleIndex = 0;
                     break;
                 }
             }
@@ -275,14 +297,14 @@ function updateHorario() {
 
             // --- CÁLCULO DE POSICIÓN Y TAMAÑO EN EL GRID ---
             // Columna: Día + 1 (la primera columna es para las horas)
-            courseDiv.style.gridColumn = `${dayColIndex + 1} / span 1`; 
+            courseDiv.style.gridColumn = `${dayColIndex + 1} / span 1`;
 
             // Fila de inicio: Índice del módulo de inicio + 2 (la primera fila es para los días, la segunda para las horas del módulo 0)
-            const gridRowStart = startModuleIndex + 2; 
+            const gridRowStart = startModuleIndex + 2;
 
             // Número de módulos que abarca el curso
             const durationMinutes = (endHour.getTime() - startHour.getTime()) / (1000 * 60);
-            const numberOfModules = Math.ceil(durationMinutes / moduleDurationMinutes); 
+            const numberOfModules = Math.ceil(durationMinutes / moduleDurationMinutes);
 
 // CALCULA el desplazamiento vertical (en px)
 // CALCULA el desplazamiento vertical (en px)
@@ -297,7 +319,7 @@ courseDiv.style.height = `${heightPx}px`;
             // Añade el curso directamente al grid principal
             courseDiv.style.width = '100%';  // ancho completo por defecto
             courseDiv.style.left = '0%';     // sin desplazamiento horizontal
-            horarioGrid.appendChild(courseDiv); 
+            horarioGrid.appendChild(courseDiv);
 
             courseDiv.onclick = (event) => {
                 event.stopPropagation(); // Evita que el clic en el curso también active el clic en la celda
@@ -336,15 +358,15 @@ document.querySelectorAll('.btn-quitar').forEach(btn => {
     document.querySelectorAll('.curso-horario').forEach(div => {
         div.classList.remove('tope'); // Quita el color rojo
         // Sus estilos de posicionamiento ya no dependen de 'left'/'width' sino de grid
-        div.style.left = ''; 
-        div.style.width = ''; 
+        div.style.left = '';
+        div.style.width = '';
         div.style.zIndex = '20'; // Asegura que los cursos siempre estén por encima
     });
 
     // Detectar y agrupar conflictos reales
     const detectedConflicts = []; // Almacena pares de cursos que se solapan
     for (let i = 0; i < selectedCourses.length; i++) {
-        for (let j = i + 1; j < selectedCourses.length; j++) { 
+        for (let j = i + 1; j < selectedCourses.length; j++) {
             if (checkConflict(selectedCourses[i], selectedCourses[j])) {
                 detectedConflicts.push([selectedCourses[i], selectedCourses[j]]);
             }
@@ -405,13 +427,13 @@ document.querySelectorAll('.btn-quitar').forEach(btn => {
  */
 function drawHorarioGrid() {
     // Limpiar completamente el grid antes de redibujar la estructura base
-    horarioGrid.innerHTML = ''; 
+    horarioGrid.innerHTML = '';
 
     // Configura las filas del grid según la cantidad de módulos UDP y su altura
     horarioGrid.style.gridTemplateRows = `repeat(${udpModules.length + 1}, ${rowHeightPx}px)`; // +1 para la fila de los días
-    
+
     // ¡CAMBIO CLAVE AQUÍ! Se establece un ancho fijo para la primera columna (horas)
-    horarioGrid.style.gridTemplateColumns = `90px repeat(${dayNames.length}, 1fr)`; 
+    horarioGrid.style.gridTemplateColumns = `90px repeat(${dayNames.length}, 1fr)`;
 
     // Celda vacía en la esquina superior izquierda (¡CORREGIDO: Creación del elemento!)
     const emptyCell = document.createElement('div');
@@ -439,7 +461,7 @@ function drawHorarioGrid() {
             const cell = document.createElement('div');
             cell.className = 'horario-cell';
             // Asignar un ID único a cada celda para poder identificarla si fuera necesario
-            cell.id = `cell-${dayName}-${moduleIndex}`; 
+            cell.id = `cell-${dayName}-${moduleIndex}`;
             horarioGrid.appendChild(cell);
         });
     });
@@ -454,8 +476,8 @@ function parseTime(timeStr) {
     if (!timeStr) return null;
     try {
         const [hours, minutes] = timeStr.split(':').map(Number);
-        const date = new Date(); 
-        date.setHours(hours, minutes, 0, 0); 
+        const date = new Date();
+        date.setHours(hours, minutes, 0, 0);
         return date;
     } catch (e) {
         console.error("Error al parsear la hora:", timeStr, e);
@@ -507,9 +529,9 @@ function applyFilters() {
         const matchesSearch = (course.Codigo && course.Codigo.toLowerCase().includes(searchText)) ||
                               (course.Nombre && course.Nombre.toLowerCase().includes(searchText)) ||
                               (course.Profesor && course.Profesor.toLowerCase().includes(searchText));
-        
+
         const matchesCategory = (selectedCategory === 'todos' || (course.Categoria && course.Categoria.toLowerCase() === selectedCategory.toLowerCase()));
-        
+
         return matchesSearch && matchesCategory;
     });
 
